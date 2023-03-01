@@ -56,9 +56,12 @@ def calculate_pool_reward(height: uint32) -> uint64:
     rates increase continuously.
     """
 
+    if height > 1000:
+        return uint64(int((7 / 8) * calculate_reward(height) * _mojo_per_two))
     if height == 0:
         return uint64(int((7 / 8) * 3000000 * _mojo_per_two))
-    return uint64(int((1 / 8) * calculate_reward(height) * _mojo_per_two))
+    else:
+        return uint64(int((1 / 8) * calculate_reward(height) * _mojo_per_two))
 
 
 def calculate_base_farmer_reward(height: uint32) -> uint64:
