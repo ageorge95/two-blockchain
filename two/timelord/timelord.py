@@ -416,8 +416,8 @@ class Timelord:
                     continue
                 iters_from_sub_slot_start = cc_info.number_of_iterations + self.last_state.get_last_ip()
 
-                timelord_fee_puzzle_hash = decode_puzzle_hash(self.config["xone_target_address"]) if \
-                    "xone_target_address" in self.config else self.constants.GENESIS_PRE_FARM_TIMELORD_PUZZLE_HASH
+                timelord_fee_puzzle_hash = decode_puzzle_hash(self.config["xtwo_target_address"]) if \
+                    "xtwo_target_address" in self.config else self.constants.GENESIS_PRE_FARM_TIMELORD_PUZZLE_HASH
                 response = timelord_protocol.NewSignagePointVDF(
                     signage_point_index,
                     dataclasses.replace(cc_info, number_of_iterations=iters_from_sub_slot_start),
