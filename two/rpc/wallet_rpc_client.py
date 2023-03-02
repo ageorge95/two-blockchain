@@ -279,44 +279,7 @@ class WalletRpcClient(RpcClient):
         return (
             PoolWalletInfo.from_json_dict(json_dict["state"]),
             [TransactionRecord.from_json_dict(tr) for tr in json_dict["unconfirmed_transactions"]],
-        )
-
-    async def find_pool_nft(self, launcher_id: str) -> Dict:
-        response = await self.fetch("find_pool_nft", {"launcher_id": launcher_id})
-        return response
-
-    async def recover_pool_nft(self, launcher_id: str) -> Dict:
-        response = await self.fetch("recover_pool_nft", {"launcher_id": launcher_id})
-        return response
-
-    async def staking_info(self, fingerprint: Optional[int] = None) -> Tuple[uint64, str]:
-        response = await self.fetch("staking_info", {"fingerprint": fingerprint})
-        return response["balance"], response["address"]
-
-    async def staking_send(
-        self,
-        amount: uint64,
-        fingerprint: Optional[int] = None,
-    ) -> TransactionRecord:
-        response = await self.fetch("staking_send", {
-            "amount": amount,
-            "fingerprint": fingerprint,
-        })
-        return TransactionRecord.from_json_dict(response["transaction"])
-
-    async def staking_withdraw(
-        self,
-        address: str,
-        amount: uint64,
-        fingerprint: Optional[int] = None,
-    ) -> TransactionRecord:
-        response = await self.fetch("staking_withdraw", {
-            "address": address,
-            "amount": amount,
-            "fingerprint": fingerprint,
-        })
-        return TransactionRecord.from_json_dict(response["transaction"])
-
+        )   
     async def recover_pool_nft(self, launcher_hash: str, contract_hash: str, coins: List[Coin]) -> SpendBundle:
         return (
             await self.fetch(
