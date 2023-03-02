@@ -336,7 +336,7 @@ introducer:
 
 wallet:
   port: 12228
-  rpc_port: 23327
+  rpc_port: 12229
 
   enable_profiler: False
 
