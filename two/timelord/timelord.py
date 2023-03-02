@@ -204,6 +204,14 @@ class Timelord:
                     )
                 return None
 
+        fee_ph = block.foliage.foliage_block_data.timelord_fee_puzzle_hash
+        if "xtwo_target_address" in self.config and fee_ph != decode_puzzle_hash(self.config["xtwo_target_address"]):
+            log.info(
+                f"Will not infuse unfinished block {block.rc_prev} sp total iters {block_sp_total_iters}, "
+                f"because another timelord will"
+            )
+            return None
+
         if new_block_iters > 0:
             return new_block_iters
         return None
@@ -418,6 +426,8 @@ class Timelord:
 
                 timelord_fee_puzzle_hash = decode_puzzle_hash(self.config["xtwo_target_address"]) if \
                     "xtwo_target_address" in self.config else self.constants.GENESIS_PRE_FARM_TIMELORD_PUZZLE_HASH
+                if "xtwo_target_address" in self.config:
+                    timelord_fee_puzzle_hash = decode_puzzle_hash(self.config["xone_target_address"])
                 response = timelord_protocol.NewSignagePointVDF(
                     signage_point_index,
                     dataclasses.replace(cc_info, number_of_iterations=iters_from_sub_slot_start),

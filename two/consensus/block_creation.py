@@ -48,6 +48,7 @@ def create_foliage(
     total_iters_sp: uint128,
     timestamp: uint64,
     farmer_reward_puzzlehash: bytes32,
+    community_reward_puzzlehash: bytes32,
     timelord_fee_puzzlehash: bytes32,
     pool_target: PoolTarget,
     get_plot_signature: Callable[[bytes32, G1Element], G2Element],
@@ -69,6 +70,7 @@ def create_foliage(
         total_iters_sp: total iters at the signage point
         timestamp: timestamp to put into the foliage block
         farmer_reward_puzzlehash: where to pay out farming reward
+        community_reward_puzzlehash: where to pay out community reward
         timelord_fee_puzzlehash: where to pay out timelord reward
         pool_target: where to pay out pool reward
         get_plot_signature: retrieve the signature corresponding to the plot public key
@@ -108,7 +110,7 @@ def create_foliage(
         pool_target,
         pool_target_signature,
         farmer_reward_puzzlehash,
-        constants.GENESIS_PRE_FARM_COMMUNITY_PUZZLE_HASH,
+        community_reward_puzzlehash,
         timelord_fee_puzzlehash,
         extension_data,
     )
@@ -198,6 +200,18 @@ def create_foliage(
                         curr.height,
                         curr.farmer_puzzle_hash,
                         calculate_base_farmer_reward(curr.height),
+                        constants.GENESIS_CHALLENGE,
+                    )
+                    community_coin = create_community_coin(
+                        curr.height,
+                        curr.community_puzzle_hash,
+                        calculate_base_community_reward(curr.height),
+                        constants.GENESIS_CHALLENGE,
+                    )
+                    timelord_coin = create_timelord_coin(
+                        curr.height,
+                        curr.timelord_puzzle_hash,
+                        calculate_base_timelord_fee(curr.height),
                         constants.GENESIS_CHALLENGE,
                     )
                     reward_claims_incorporated += [pool_coin, farmer_coin, community_coin, timelord_coin]
@@ -418,6 +432,7 @@ def create_unfinished_block(
         total_iters_sp,
         timestamp,
         farmer_reward_puzzle_hash,
+        constants.GENESIS_PRE_FARM_COMMUNITY_PUZZLE_HASH,
         signage_point.timelord_fee_puzzle_hash,
         pool_target,
         get_plot_signature,
