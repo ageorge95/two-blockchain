@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
-from blspy import G1Element, PrivateKey
+from blspy import G1Element, PrivateKey, G2Element
 
 from two.consensus.block_rewards import calculate_base_farmer_reward
 from two.consensus.coinbase import create_puzzlehash_for_pk
@@ -12,15 +12,19 @@ from two.pools.pool_puzzles import SINGLETON_MOD_HASH, create_p2_singleton_puzzl
 from two.pools.pool_wallet import PoolWallet
 from two.pools.pool_wallet_info import FARMING_TO_POOL, PoolState, PoolWalletInfo, create_pool_state
 from two.protocols.protocol_message_types import ProtocolMessageTypes
+from two.rpc.full_node_rpc_client import FullNodeRpcClient
 from two.server.outbound_message import NodeType, make_msg
 from two.simulator.simulator_protocol import FarmNewBlockProtocol
 from two.types.blockchain_format.coin import Coin
 from two.types.blockchain_format.program import Program, SerializedProgram
 from two.types.blockchain_format.sized_bytes import bytes32
+from two.types.coin_spend import CoinSpend
+from two.types.spend_bundle import SpendBundle
 from two.util.bech32m import decode_puzzle_hash, encode_puzzle_hash
 from two.util.byte_types import hexstr_to_bytes
-from two.util.config import load_config
-from two.util.ints import uint32, uint64
+from two.util.config import load_config, selected_network_address_prefix
+from two.util.default_root import DEFAULT_ROOT_PATH
+from two.util.ints import uint32, uint64, uint16
 from two.util.keychain import KeyringIsLocked, bytes_to_mnemonic, generate_mnemonic
 from two.util.path import path_from_root
 from two.util.ws_message import WsRpcMessage, create_payload_dict
@@ -39,6 +43,7 @@ from two.wallet.util.backup_utils import download_backup, get_backup_info, uploa
 from two.wallet.util.trade_utils import trade_record_to_dict
 from two.wallet.util.transaction_type import TransactionType
 from two.wallet.util.wallet_types import WalletType
+from two.wallet.wallet import Wallet
 from two.wallet.wallet_info import WalletInfo
 from two.wallet.wallet_node import WalletNode
 
@@ -119,6 +124,14 @@ class WalletRpcApi:
             "/pw_status": self.pw_status,
             # Pool NFT
             "/recover_pool_nft": self.recover_pool_nft,
+
+            # recover_pool_nft
+            "/find_pool_nft": self.find_pool_nft,
+            "/recover_pool_nft_new": self.recover_pool_nft_new,
+            # staking
+            "/staking_info": self.staking_info,
+            "/staking_send": self.staking_send,
+            "/staking_withdraw": self.staking_withdraw,
         }
 
     async def _state_changed(self, *args) -> List[WsRpcMessage]:
@@ -1272,7 +1285,6 @@ class WalletRpcApi:
         }
 
     async def recover_pool_nft(self, request):
-        aggregated_signature: str = "0xc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
         launcher_hash = bytes32(hexstr_to_bytes(request["launcher_hash"]))
         contract_hash = bytes32(hexstr_to_bytes(request["contract_hash"]))
         delay = uint64(604800)
@@ -1294,7 +1306,247 @@ class WalletRpcApi:
 
         return {
             "spend_bundle": {
-                "aggregated_signature": aggregated_signature,
+                "aggregated_signature": G2Element(),
                 "coin_solutions": solutions,
             }
         }
+
+    async def find_pool_nft(self, request) -> Dict:
+        launcher_hash = request.get("launcher_id", "")
+        if launcher_hash.startswith("0x") or launcher_hash.startswith("0X"):
+            launcher_hash = launcher_hash[2:]
+        if len(launcher_hash) != 64:
+            raise ValueError("bad launcher id")
+        launcher_id = bytes32(hexstr_to_bytes(launcher_hash))
+        config: Dict = load_config(DEFAULT_ROOT_PATH, "config.yaml")
+        client = await FullNodeRpcClient.create(
+            config["self_hostname"],
+            uint16(config["full_node"]["rpc_port"]),
+            DEFAULT_ROOT_PATH,
+            config
+        )
+        total_amount = 0
+        record_amount = 0
+        contract_address = ""
+        try:
+            contract_hash: Optional[bytes32] = None
+            delay: uint64 = 604800
+            prefix = selected_network_address_prefix(config)
+            puzzle_hashes = await self.service.wallet_state_manager.puzzle_store.get_first_puzzle_hashes(30)
+            for puzzle_hash in puzzle_hashes:
+                puzzle = create_p2_singleton_puzzle(SINGLETON_MOD_HASH, launcher_id, delay, puzzle_hash)
+                status = await client.check_puzzle_hash_coin(puzzle.get_tree_hash())
+                if status:
+                    contract_hash = puzzle.get_tree_hash()
+                    break
+            if contract_hash is not None:
+                contract_address = encode_puzzle_hash(contract_hash, prefix)
+                coin_records = await client.get_coin_records_by_puzzle_hash(contract_hash, False)
+                for coin_record in coin_records:
+                    amount = uint64(coin_record.coin.amount)
+                    if coin_record.timestamp <= int(time.time()) - delay:
+                        record_amount += amount
+                    total_amount += amount
+        except Exception as e:
+            log.error(f"Exception from 'full node' {e}")
+        finally:
+            client.close()
+        await client.await_closed()
+        return {
+            "contract_address": contract_address,
+            "total_amount": total_amount,
+            "balance_amount": total_amount-record_amount,
+            "record_amount": record_amount,
+        }
+
+    async def recover_pool_nft_new(self, request) -> Dict:
+        launcher_hash = request.get("launcher_id", "")
+        if launcher_hash.startswith("0x") or launcher_hash.startswith("0X"):
+            launcher_hash = launcher_hash[2:]
+        if len(launcher_hash) != 64:
+            raise ValueError("bad launcher id")
+        launcher_id = bytes32(hexstr_to_bytes(launcher_hash))
+        config: Dict = load_config(DEFAULT_ROOT_PATH, "config.yaml")
+        client = await FullNodeRpcClient.create(
+            config["self_hostname"],
+            uint16(config["full_node"]["rpc_port"]),
+            DEFAULT_ROOT_PATH,
+            config
+        )
+        data = {"contract_address": "", "status": ""}
+        try:
+            contract_hash: Optional[bytes32] = None
+            puzzle: Optional[Program] = None
+            delay: uint64 = 604800
+            prefix = selected_network_address_prefix(config)
+            puzzle_hashes = await self.service.wallet_state_manager.puzzle_store.get_first_puzzle_hashes(30)
+            for puzzle_hash in puzzle_hashes:
+                puzzle = create_p2_singleton_puzzle(SINGLETON_MOD_HASH, launcher_id, delay, puzzle_hash)
+                status = await client.check_puzzle_hash_coin(puzzle.get_tree_hash())
+                if status:
+                    contract_hash = puzzle.get_tree_hash()
+                    break
+            coin_spends: List[CoinSpend] = []
+            total_amount = 0
+            record_amount = 0
+            if contract_hash is not None:
+                data["contract_address"] = encode_puzzle_hash(contract_hash, prefix)
+                coin_records = await client.get_coin_records_by_puzzle_hash(contract_hash, False)
+                for coin_record in coin_records:
+                    amount = uint64(coin_record.coin.amount)
+                    if coin_record.timestamp <= int(time.time()) - delay:
+                        coin_spends.append(CoinSpend(
+                            coin=coin_record.coin,
+                            puzzle_reveal=SerializedProgram.from_program(puzzle),
+                            solution=SerializedProgram.from_program(Program.to([amount, 0])),
+                        ))
+                        record_amount += amount
+                    total_amount += amount
+            data["num"] = len(coin_spends)
+            data["amount"] = record_amount
+            data["total_amount"] = total_amount
+            if len(coin_spends) > 0:
+                spend_bundle: SpendBundle = SpendBundle(
+                    coin_spends=coin_spends,
+                    aggregated_signature=G2Element(),
+                )
+                data["status"] = (await client.push_tx(spend_bundle))["status"]
+        except Exception as e:
+            log.error(f"Exception from 'full node' {e}")
+        finally:
+            client.close()
+        await client.await_closed()
+        return data
+
+    async def staking_info(self, request) -> Dict:
+        fingerprint = request["fingerprint"]
+        sk, _ = await self._get_private_key(fingerprint)
+        if sk is None:
+            raise ValueError(f"fingerprint not: {fingerprint}")
+        config: Dict = load_config(DEFAULT_ROOT_PATH, "config.yaml")
+        client = await FullNodeRpcClient.create(
+            config["self_hostname"],
+            uint16(config["full_node"]["rpc_port"]),
+            DEFAULT_ROOT_PATH,
+            config
+        )
+        puzzle_hash = create_puzzlehash_for_pk(master_sk_to_farmer_sk(sk).get_g1())
+        # puzzle_hash = create_staking_puzzle(create_puzzlehash_for_pk(master_sk_to_farmer_sk(sk).get_g1())).get_tree_hash()
+        coin_records = None
+        try:
+            coin_records = await client.get_coin_records_by_puzzle_hash(puzzle_hash, False)
+        except Exception as e:
+            log.error(f"Exception from 'full node' {e}")
+        finally:
+            client.close()
+        await client.await_closed()
+        balance = sum(uint64(coin.coin.amount) for coin in coin_records)
+        return {
+            "balance": balance,
+            "address": encode_puzzle_hash(puzzle_hash, selected_network_address_prefix(config)),
+        }
+
+    async def staking_send(self, request) -> Dict:
+        if await self.service.wallet_state_manager.synced() is False:
+            raise ValueError("Wallet needs to be fully synced before staking transactions")
+        if not isinstance(request["amount"], int):
+            raise ValueError("An integer amount is required (too many decimals)")
+        fingerprint = request["fingerprint"]
+        sk, _ = await self._get_private_key(fingerprint)
+        if sk is None:
+            raise ValueError(f"fingerprint not: {fingerprint}")
+        puzzle_hash = create_puzzlehash_for_pk(master_sk_to_farmer_sk(sk).get_g1())
+        # puzzle_hash = create_staking_puzzle(create_puzzlehash_for_pk(master_sk_to_farmer_sk(sk).get_g1())).get_tree_hash()
+        amount: uint64 = uint64(request["amount"])
+        wallet = self.service.wallet_state_manager.wallets[uint32(1)]
+        assert isinstance(wallet, Wallet)
+        async with self.service.wallet_state_manager.lock:
+            tx: TransactionRecord = await wallet.generate_signed_transaction(
+                amount, puzzle_hash, uint64(0)
+            )
+            await wallet.push_transaction(tx)
+        return {
+            "transaction": tx,
+            "transaction_id": tx.name,
+        }
+
+    async def staking_withdraw(self, request) -> Dict:
+        if await self.service.wallet_state_manager.synced() is False:
+            raise ValueError("Wallet needs to be fully synced before withdraw staking transactions")
+        if not isinstance(request["amount"], int):
+            raise ValueError("An integer amount is required (too many decimals)")
+        fingerprint = request["fingerprint"]
+        sk, seed = await self._get_private_key(fingerprint)
+        if sk is None:
+            raise ValueError(f"fingerprint not: {fingerprint}")
+        config: Dict = load_config(DEFAULT_ROOT_PATH, "config.yaml")
+        client = await FullNodeRpcClient.create(
+            config["self_hostname"],
+            uint16(config["full_node"]["rpc_port"]),
+            DEFAULT_ROOT_PATH,
+            config
+        )
+        coin_records = None
+        try:
+            coin_records = await client.get_coin_records_by_puzzle_hash(
+                create_puzzlehash_for_pk(master_sk_to_farmer_sk(sk).get_g1()),
+                False
+            )
+        except Exception as e:
+            log.error(f"Exception from 'full node' {e}")
+        finally:
+            client.close()
+        await client.await_closed()
+        if len(coin_records) == 0:
+            raise ValueError(f"no staking data")
+        coins = [coin_record.coin for coin_record in coin_records]
+        # Sort the coins by amount
+        sorted_coins = sorted(coins, key=lambda x: x.amount, reverse=True)
+        coins_json = []
+        totalAmount = 0
+        amount: uint64 = uint64(request["amount"])
+        for coin in sorted_coins:
+            if amount == 0:
+                totalAmount += coin.amount
+                coins_json.append(coin.to_json_dict())
+            elif amount == coin.amount:
+                totalAmount = coin.amount
+                coins_json = [coin.to_json_dict()]
+                break
+            else:
+                if coin.amount > amount:
+                    continue
+                totalAmount += coin.amount
+                coins_json.append(coin.to_json_dict())
+                if totalAmount >= amount:
+                    break
+
+        log.info(f"totalAmount: {totalAmount} coins_json {coins_json}")
+        if totalAmount == 0:
+            raise ValueError(f"Staking amount is 0")
+        if amount > totalAmount:
+            raise ValueError(f"Staking amount not more {totalAmount}")
+        if totalAmount > 0:
+            wallet = self.service.wallet_state_manager.wallets[uint32(1)]
+            assert isinstance(wallet, Wallet)
+            if "address" in request and request["address"] != "":
+                prefix = selected_network_address_prefix(config)
+                if request["address"][0: len(prefix)] != prefix:
+                    raise ValueError("Unexpected Address Prefix")
+                puzzle_hash_hex = decode_puzzle_hash(request["address"]).hex()
+            else:
+                puzzle_hash_hex = (await wallet.get_puzzle_hash(False)).hex()
+            async with self.service.wallet_state_manager.lock:
+                transaction: TransactionRecord = (await self.create_signed_transaction({
+                    "additions": [{
+                        "puzzle_hash": puzzle_hash_hex,
+                        "amount": totalAmount,
+                        "memos": ["withdraw staking"],
+                    }],
+                    "coins": coins_json,
+                    "fee": 0,
+                }, hold_lock=False))[
+                    "signed_tx"
+                ]
+                await wallet.push_transaction(transaction)
+            return {"transaction": transaction, "transaction_id": transaction.name}

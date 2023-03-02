@@ -418,13 +418,13 @@ class WalletNode:
                 return True
         return False
 
-    async def update_stakings(self, peer: WSChiaConnection, height: uint64, farmer_public_key: G1Element) -> None:
+    async def update_stakings(self, peer: WSChiaConnection, height: uint32, farmer_public_key: G1Element) -> None:
         "fetch staking"
         height = height - 1 if height > 0 else 0
         blockchain = self.wallet_state_manager.blockchain
 
         # calculate blocks from cache
-        blocks = 0
+        blocks = uint64(0)
         if blockchain.get_peak_height() is not None:
             block_range = self.constants.STAKING_ESTIMATE_BLOCK_RANGE
             curr: Optional[BlockRecord] = blockchain.try_block_record(blockchain.height_to_hash(height))
@@ -463,6 +463,9 @@ class WalletNode:
                         block, block.transactions_filter, None
                     )
 
+                    self.log.info("added_coins removed_coins")
+                    self.log.info(removals)
+                    self.log.info(additions)
                     # Get Additions
                     added_coins = await self.get_additions(peer, block, additions)
                     if added_coins is None:
@@ -477,7 +480,8 @@ class WalletNode:
                     additional_coin_spends: List[CoinSpend] = await self.get_additional_coin_spends(
                         peer, block, added_coins, removed_coins
                     )
-
+                    self.log.info(added_coins)
+                    self.log.info(removed_coins)
                     hbr = HeaderBlockRecord(block, added_coins, removed_coins)
                 else:
                     hbr = HeaderBlockRecord(block, [], [])

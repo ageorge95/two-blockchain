@@ -14,6 +14,7 @@ from two.cmds.plotnft import plotnft_cmd
 from two.cmds.plots import plots_cmd
 from two.cmds.plotters import plotters_cmd
 from two.cmds.show import show_cmd
+from two.cmds.staking import staking_cmd
 from two.cmds.start import start_cmd
 from two.cmds.stop import stop_cmd
 from two.cmds.wallet import wallet_cmd
@@ -123,6 +124,7 @@ cli.add_command(stop_cmd)
 cli.add_command(netspace_cmd)
 cli.add_command(farm_cmd)
 cli.add_command(plotters_cmd)
+cli.add_command(staking_cmd)
 
 if supports_keyring_passphrase():
     cli.add_command(passphrase_cmd)

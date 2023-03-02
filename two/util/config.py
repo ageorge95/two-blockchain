@@ -29,6 +29,11 @@ def create_default_two_config(root_path: Path, filenames=["config.yaml"]) -> Non
             shutil.move(str(tmp_path), str(path))
 
 
+def selected_network_address_prefix(config: Dict[str, Any]) -> str:
+    address_prefix = config["network_overrides"]["config"][config["selected_network"]]["address_prefix"]
+    return address_prefix
+
+
 def config_path_for_filename(root_path: Path, filename: Union[str, Path]) -> Path:
     path_filename = Path(filename)
     if path_filename.is_absolute():

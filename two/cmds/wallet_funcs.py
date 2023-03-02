@@ -338,3 +338,88 @@ async def execute_with_wallet(
             print(f"Exception from 'wallet' {e}")
     wallet_client.close()
     await wallet_client.await_closed()
+
+
+async def staking_info(args: dict, wallet_client: WalletRpcClient, fingerprint: int) -> None:
+    balance, address = await wallet_client.staking_info(fingerprint)
+    two = balance / units["two"]
+    print(f"Staking balance: {two}")
+    print(f"Staking address: {address}")
+
+
+async def staking_send(args: dict, wallet_client: WalletRpcClient, fingerprint: int) -> None:
+    amount = Decimal(args["amount"])
+
+    if amount == 0:
+        print("You can not staking an empty transaction")
+        return
+
+    print("Submitting staking transaction...")
+    res = await wallet_client.staking_send(
+        uint64(int(amount * units["two"])), fingerprint
+    )
+
+    tx_id = res.name
+    start = time.time()
+    while time.time() - start < 10:
+        await asyncio.sleep(0.1)
+        tx = await wallet_client.get_transaction("1", tx_id)
+        if len(tx.sent_to) > 0:
+            print(f"Transaction submitted to nodes: {tx.sent_to}")
+            print(f"Run 'two wallet get_transaction -f {fingerprint} -tx 0x{tx_id}' to get status")
+            return None
+
+    print("Staking transaction not yet submitted to nodes")
+    print(f"To get status, use command: two wallet get_transaction -f {fingerprint} -tx 0x{tx_id}")
+
+
+async def staking_withdraw(args: dict, wallet_client: WalletRpcClient, fingerprint: int) -> None:
+    amount = Decimal(args["amount"])
+    address = args["address"]
+
+    print("Submitting withdraw staking transaction...")
+    response = await wallet_client.staking_withdraw(
+        address, uint64(int(amount * units["two"])), fingerprint
+    )
+    # status = response["status"]
+    # amount = response["amount"] / units["two"]
+    # total_amount = response["total_amount"] / units["two"]
+    # print(f"Total Amount: {total_amount} XTWO")
+    # print(f"Record Amount: {amount} XTWO")
+    # print(f"Status: {status}")
+    tx_id = response.name
+    start = time.time()
+    while time.time() - start < 10:
+        await asyncio.sleep(0.1)
+        tx = await wallet_client.get_transaction("1", tx_id)
+        if len(tx.sent_to) > 0:
+            print(f"Transaction submitted to nodes: {tx.sent_to}")
+            print(f"Run 'two wallet get_transaction -f {fingerprint} -tx 0x{tx_id}' to get status")
+            return None
+
+    print("Withdraw staking transaction not yet submitted to nodes")
+    print(f"To get status, use command: two wallet get_transaction -f {fingerprint} -tx 0x{tx_id}")
+
+
+async def find_pool_nft(args: dict, wallet_client: WalletRpcClient, fingerprint: int) -> None:
+    launcher_id: str = args["launcher_id"]
+    response = await wallet_client.find_pool_nft(launcher_id)
+    contract_address = response["contract_address"]
+    total_amount = response["total_amount"] / units["two"]
+    record_amount = response["record_amount"] / units["two"]
+    balance_amount = response["balance_amount"] / units["two"]
+    print(f"Contract Address: {contract_address}")
+    print(f"Total Amount: {total_amount} XTWO")
+    print(f"Balance Amount: {balance_amount} XTWO")
+    print(f"Record Amount: {record_amount} XTWO")
+
+
+async def recover_pool_nft(args: dict, wallet_client: WalletRpcClient, fingerprint: int) -> None:
+    launcher_id: str = args["launcher_id"]
+    response = await wallet_client.recover_pool_nft(launcher_id)
+    contract_address = response["contract_address"]
+    status = response["status"]
+    amount = response["amount"] / units["two"]
+    print(f"Contract Address: {contract_address}")
+    print(f"Record Amount: {amount} XTWO")
+    print(f"Status: {status}")
