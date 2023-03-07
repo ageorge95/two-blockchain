@@ -1390,7 +1390,7 @@ class FullNodeAPI:
         stakings = []
         for pk in request.public_keys:
             difficulty_coefficient = await self.full_node.blockchain.get_farmer_difficulty_coefficient(
-                pk, request.height, request.blocks
+                pk, request.height
             )
             stakings.append((pk, str(difficulty_coefficient)))
         msg = make_msg(ProtocolMessageTypes.respond_stakings, farmer_protocol.FarmerStakings(stakings=stakings))

@@ -81,5 +81,3 @@ class RequestStakings(Streamable):
     public_keys: List[G1Element]
     # None means current peak
     height: Optional[uint32]
-    # wallet can calculate this on itself
-    blocks: Optional[uint64]

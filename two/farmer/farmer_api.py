@@ -448,7 +448,7 @@ class FarmerAPI:
                     )
                 )
             rsp: Optional[farmer_protocol.FarmerStakings] = await peer.request_stakings(
-                farmer_protocol.RequestStakings(public_keys=self.farmer.get_public_keys(), height=None, blocks=None)
+                farmer_protocol.RequestStakings(public_keys=self.farmer.get_public_keys(), height=None)
             )
             if rsp is None or not isinstance(rsp, farmer_protocol.FarmerStakings):
                 self.log.warning(f"bad RequestStakings response from peer {rsp}")
