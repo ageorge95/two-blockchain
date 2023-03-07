@@ -976,11 +976,9 @@ class Blockchain(BlockchainInterface):
         height: Optional[uint32] = None,
         blocks: Optional[uint64] = None,
     ) -> Decimal:
-        block_range = self.constants.STAKING_ESTIMATE_BLOCK_RANGE
-
         peak: Optional[BlockRecord] = None
         peak_height = height
-        coeff = Decimal(1)
+        coeff = Decimal(20)
         if peak_height is None:
             peak_height = self._peak_height
         if peak_height is not None:
@@ -989,22 +987,22 @@ class Blockchain(BlockchainInterface):
             header_hash = self.height_to_hash(peak_height)
             peak = await self.block_store.get_block_record(header_hash)
 
-        if blocks is None:
-            curr: Optional[BlockRecord] = peak
-            begin_height = max((curr.height if curr is not None else 0) - block_range, 1)
-            blocks = 0
-            while curr is not None and curr.height > begin_height:
-                if curr.farmer_public_key == farmer_public_key:
-                    blocks += 1
-                curr = self.try_block_record(curr.prev_hash)
+        block_range = 0
+        curr: Optional[BlockRecord] = peak
+        begin_height = max((curr.height if curr is not None else 0) - self.constants.STAKING_ESTIMATE_BLOCK_RANGE, 1)
+        blocks = 0
+        while curr is not None and curr.height > begin_height:
+            if curr.farmer_public_key == farmer_public_key:
+                blocks += 1
+            block_range += 1
+            curr = self.try_block_record(curr.prev_hash)
         if block_range == 0:
             return coeff
         network_space = await self.get_peak_network_space(block_range, peak)
         staking = await self.get_peak_farmer_staking(farmer_public_key, peak)
-
-        space = uint128(int(network_space * blocks / block_range))
+        space = float(network_space * blocks / block_range)
         if blocks != 0 and network_space != 0:
-            coeff = Decimal(str(max(1/(staking/space+1), 0.005)))
+            coeff = Decimal(str(0.05+1/(staking/space/500+0.05)))
 
         # log.info(
         #     f"minimal_staking : {minimal_staking}, space : {space} "
